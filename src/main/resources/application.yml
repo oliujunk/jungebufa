@@ -1,0 +1,20 @@
+spring:
+  main:
+    web-application-type: none
+
+nacos:
+  config:
+    server-addr: 115.28.187.9:8848
+    bootstrap:
+      enable: true
+    data-id: xph-junge-bufa
+    group: PROD_GROUP
+    type: yaml
+    auto-refresh: true
+
+logging:
+  file:
+    max-history: 30
+    max-size: 50MB
+    path: logs
+
