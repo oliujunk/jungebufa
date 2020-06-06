@@ -175,7 +175,9 @@ public class Junge {
             try {
                 TimeUnit.SECONDS.sleep(5);
                 LOGGER.info("重新连接");
-                connect();
+                if (channel == null || !channel.isActive()) {
+                    connect();
+                }
             } catch (InterruptedException e) {
                 LOGGER.error(e.getMessage());
             }

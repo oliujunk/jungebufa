@@ -27,7 +27,7 @@ public class JungebufaApplication implements ApplicationRunner {
 
 	@Override
 	public void run(ApplicationArguments args) {
-		junge.start();
-		chunkai.start();
+		new Thread(() -> junge.start()).start();
+		new Thread(() -> chunkai.start()).start();
 	}
 }

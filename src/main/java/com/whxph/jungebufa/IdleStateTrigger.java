@@ -32,7 +32,6 @@ public class IdleStateTrigger extends ChannelInboundHandlerAdapter {
                 String msg = "0D0A";
                 out.writeBytes(ByteBufUtil.decodeHexDump(msg));
                 ctx.writeAndFlush(out);
-                LOGGER.info("心跳");
             }
         } else {
             super.userEventTriggered(ctx, evt);
