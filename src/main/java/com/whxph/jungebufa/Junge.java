@@ -1,7 +1,13 @@
 package com.whxph.jungebufa;
 
 import com.alibaba.nacos.api.config.annotation.NacosValue;
+import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -9,11 +15,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.io.*;
-import java.net.Socket;
+import javax.annotation.Resource;
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author liujun
@@ -22,6 +28,12 @@ import java.time.format.DateTimeFormatter;
 public class Junge {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Junge.class);
+
+    @Resource
+    private ReceiveHandler receiveHandler;
+
+    @Resource
+    private IdleStateTrigger idleStateTrigger;
 
     @SuppressWarnings("unused")
     @NacosValue(value = "${junge.id}", autoRefreshed = true)
@@ -59,14 +71,19 @@ public class Junge {
     @NacosValue(value = "${junge.token}", autoRefreshed = true)
     private String token;
 
-    @Scheduled(cron = "0 0/4 * * * ?")
+    private Channel channel;
+
+    public void start() {
+        connect();
+    }
+
+    @Scheduled(cron = "0 */4 * * * ?")
     public void update() {
         String head = "8888";
         String sjlx = "00";
         String bysj = "0000000000000000";
         String end = "0304";
         String[] deviceIds = id.split(",");
-        Socket socket = null;
         for (String deviceId : deviceIds) {
             try {
                 String xxbm = RandomStringUtils.randomNumeric(8);
@@ -110,22 +127,15 @@ public class Junge {
                 byte xorValue = getXor(ByteBufUtil.decodeHexDump(temp));
                 String xorStr = String.format("%02X", xorValue);
                 String message = temp + xorStr + end;
-                LOGGER.info("[{}]: {}", deviceId, message);
-                socket = new Socket("119.164.253.229", 8888);
-                OutputStream out = socket.getOutputStream();
-                out.write(ByteBufUtil.decodeHexDump(message));
-                out.flush();
-                out.close();
+                if (channel.isActive()) {
+                    channel.writeAndFlush(Unpooled.copiedBuffer(ByteBufUtil.decodeHexDump(message)));
+                    LOGGER.info("[{}]: {}", deviceId, message);
+                } else {
+                    LOGGER.error("[{}]:发送异常", deviceId);
+                }
+                TimeUnit.SECONDS.sleep(1);
             } catch (Exception e) {
                 LOGGER.error("[{}]:发送异常", deviceId, e);
-            } finally {
-                if (socket != null) {
-                    try {
-                        socket.close();
-                    } catch (IOException e) {
-                        LOGGER.error("socket关闭异常", e);
-                    }
-                }
             }
         }
     }
@@ -136,5 +146,39 @@ public class Junge {
             temp ^= data[i];
         }
         return temp;
+    }
+
+    private void connect() {
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.group(workerGroup);
+            bootstrap.channel(NioSocketChannel.class);
+            bootstrap.option(ChannelOption.SO_KEEPALIVE, true);
+            bootstrap.handler(new ChannelInitializer<NioSocketChannel>() {
+                @Override
+                protected void initChannel(NioSocketChannel ch) {
+                    ChannelPipeline pipeline = ch.pipeline();
+                    pipeline.addLast(new IdleStateHandler(0, 10, 0, TimeUnit.SECONDS));
+                    pipeline.addLast(idleStateTrigger);
+                    pipeline.addLast(receiveHandler);
+                }
+            });
+
+            ChannelFuture channelFuture = bootstrap.connect("119.164.253.229", 8888).sync();
+            channel = channelFuture.channel();
+            channelFuture.channel().closeFuture().sync();
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage());
+        } finally {
+            workerGroup.shutdownGracefully();
+            try {
+                TimeUnit.SECONDS.sleep(5);
+                LOGGER.info("重新连接");
+                connect();
+            } catch (InterruptedException e) {
+                LOGGER.error(e.getMessage());
+            }
+        }
     }
 }
